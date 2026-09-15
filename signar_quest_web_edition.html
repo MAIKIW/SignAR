@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SignAR Quest - Web Edition</title>
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Mitr:wght@300;400;500;600&display=swap" rel="stylesheet">
+    
+    <!-- Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- MediaPipe Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <style>
+        body {
+            font-family: 'Mitr', sans-serif;
+            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+            color: white;
+            overflow: hidden;
+            touch-action: none; /* Prevent scroll on touch */
+        }
+
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Container for camera to ensure it covers background but stays contained */
+        #camera-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+            background-color: #000;
+        }
+
+        #input_video {
+            display: none; /* Hidden, we draw it on canvas */
+        }
+
+        #output_canvas {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1); /* Mirror camera */
+        }
+
+        /* UI Overlays */
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 10;
+            pointer-events: none; /* Let clicks pass through to canvas if needed */
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 20px;
+        }
+
+        .pointer-events-auto {
+            pointer-events: auto;
+        }
+
+        .screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 20;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%);
+            transition: opacity 0.5s ease;
+        }
+
+        .hidden-screen {
+            opacity: 0;
+            pointer-events: none;
+            z-index: -1;
+        }
+
+        /* Animations */
+        @keyframes pulse-green {
+            0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); }
+            70% { box-shadow: 0 0 0 15px rgba(34, 197, 94, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+        }
+
+        .success-anim {
+            animation: pulse-green 1s infinite;
+            border-color: #22c55e !important;
+        }
+        
+        @keyframes slideIn {
+            from { transform: translateY(50px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        
+        .slide-in {
+            animation: slideIn 0.5s ease forwards;
+        }
+
+        .progress-bar-transition {
+            transition: width 0.1s linear, background-color 0.3s ease;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Screen: Main Menu -->
+    <div id="start-screen" class="screen">
+        <div class="glass-panel p-8 rounded-3xl max-w-md w-11/12 text-center flex flex-col items-center slide-in pointer-events-auto">
+            <div class="w-24 h-24 bg-blue-500/20 rounded-full flex items-center justify-center mb-6 text-blue-400 text-5xl">
+                <i class="fa-solid fa-hand-sparkles"></i>
+            </div>
+            <h1 class="text-4xl font-bold mb-2 text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-emerald-400">SignAR Quest</h1>
+            <p class="text-gray-300 mb-8">เรียนรู้ภาษามือผ่าน AI <br> เปิดกล้องและฝึกทำท่าทางไปพร้อมกัน</p>
+            
+            <div class="w-full bg-slate-800/50 rounded-xl p-4 mb-8 text-left text-sm text-gray-300">
+                <p class="mb-2"><i class="fa-solid fa-camera text-blue-400 mr-2"></i> ระบบต้องการเข้าถึงกล้องเว็บแคม</p>
+                <p><i class="fa-solid fa-microchip text-emerald-400 mr-2"></i> ประมวลผลบนเครื่อง ปลอดภัย 100%</p>
+            </div>
+
+            <button onclick="startGame()" class="w-full bg-gradient-to-r from-blue-500 to-emerald-500 hover:from-blue-600 hover:to-emerald-600 text-white font-semibold py-4 px-8 rounded-xl text-xl transition-all transform hover:scale-105 active:scale-95 shadow-lg shadow-blue-500/30">
+                <i class="fa-solid fa-play mr-2"></i> เริ่มเล่นเลย
+            </button>
+        </div>
+    </div>
+
+    <!-- Screen: AR Gameplay -->
+    <div id="camera-container">
+        <video id="input_video" autoplay playsinline></video>
+        <canvas id="output_canvas"></canvas>
+    </div>
+
+    <div id="ui-layer" class="hidden-screen">
+        <!-- Top Bar -->
+        <div class="flex justify-between items-start pointer-events-auto w-full">
+            <button onclick="returnToMenu()" class="glass-panel p-3 rounded-full hover:bg-white/10 transition">
+                <i class="fa-solid fa-arrow-left text-xl"></i>
+            </button>
+            <div class="glass-panel px-6 py-2 rounded-full text-center">
+                <div class="text-xs text-gray-300">XP รวม</div>
+                <div class="text-xl font-bold text-emerald-400"><span id="xp-display">0</span> XP</div>
+            </div>
+        </div>
+
+        <!-- Middle: Target Gesture Info -->
+        <div class="flex justify-between items-center w-full pointer-events-none mt-4">
+            <!-- Instructions -->
+            <div class="glass-panel p-6 rounded-2xl max-w-sm slide-in border-l-4 border-l-blue-500">
+                <div class="text-sm text-blue-300 mb-1 font-semibold uppercase tracking-wider">โจทย์ปัจจุบัน: ท่าที่ <span id="level-display">1</span>/4</div>
+                <h2 id="target-name" class="text-3xl font-bold mb-2">แบมือ (สวัสดี)</h2>
+                <p id="target-desc" class="text-gray-300 text-sm">เหยียดนิ้วทั้ง 5 นิ้วออกให้สุด</p>
+            </div>
+            
+            <!-- Target Image/Icon -->
+            <div id="target-icon-container" class="glass-panel w-32 h-32 rounded-full flex items-center justify-center text-6xl shadow-xl transition-all duration-300">
+                🖐️
+            </div>
+        </div>
+
+        <!-- Bottom: Accuracy Bar -->
+        <div class="w-full pb-6 pointer-events-auto">
+            <div class="glass-panel p-6 rounded-3xl w-full max-w-2xl mx-auto flex flex-col items-center">
+                <div class="flex justify-between w-full mb-2">
+                    <span class="font-semibold" id="feedback-msg">กำลังรอการทำท่าทาง...</span>
+                    <span class="font-bold text-blue-400"><span id="accuracy-text">0</span>%</span>
+                </div>
+                <!-- Progress Bar -->
+                <div class="w-full h-4 bg-gray-700 rounded-full overflow-hidden">
+                    <div id="accuracy-bar" class="h-full bg-blue-500 progress-bar-transition" style="width: 0%"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Screen: Success Overlay -->
+    <div id="success-screen" class="screen hidden-screen bg-black/60 backdrop-blur-sm">
+        <div class="glass-panel p-10 rounded-3xl text-center transform transition-all scale-90 slide-in">
+            <div class="text-7xl mb-4 text-emerald-400"><i class="fa-solid fa-circle-check"></i></div>
+            <h2 class="text-4xl font-bold mb-2">ถูกต้อง!</h2>
+            <p class="text-xl text-emerald-300 mb-6">+100 XP</p>
+            <button onclick="nextLevel()" class="bg-white text-emerald-600 font-bold py-3 px-8 rounded-xl text-lg hover:bg-gray-100 transition shadow-lg pointer-events-auto">
+                ด่านถัดไป <i class="fa-solid fa-arrow-right ml-2"></i>
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // --- State Management ---
+        let totalXP = 0;
+        let currentLevelIndex = 0;
+        let holdFrames = 0;
+        const FRAMES_TO_PASS = 20; // ถือท่าค้างไว้กี่เฟรมถึงจะผ่าน
+        let isProcessing = false;
+        let gameActive = false;
+        let stream = null;
+
+        // --- Gesture Definitions ---
+        // เรากำหนดกฎว่า นิ้วไหนต้อง "เหยียด (true)" หรือ "งอ (false)"
+        const levels = [
+            {
+                name: "แบมือ (ทักทาย)",
+                desc: "เหยียดนิ้วทั้ง 5 นิ้วออกให้สุด และหันหน้ามือเข้ากล้อง",
+                icon: "🖐️",
+                rules: { thumb: true, index: true, middle: true, ring: true, pinky: true }
+            },
+            {
+                name: "กำปั้น",
+                desc: "งอนิ้วทุกนิ้วเข้ามาเก็บในฝ่ามือ",
+                icon: "✊",
+                rules: { thumb: false, index: false, middle: false, ring: false, pinky: false }
+            },
+            {
+                name: "เยี่ยม (ดีมาก)",
+                desc: "กำมือ และชูนิ้วโป้งขึ้นมานิ้วเดียว",
+                icon: "👍",
+                rules: { thumb: true, index: false, middle: false, ring: false, pinky: false }
+            },
+            {
+                name: "สู้ๆ (Victory)",
+                desc: "ชูนิ้วชี้และนิ้วกลางขึ้น (ตัว V)",
+                icon: "✌️",
+                rules: { thumb: false, index: true, middle: true, ring: false, pinky: false }
+            }
+        ];
+
+        // --- DOM Elements ---
+        const videoElement = document.getElementById('input_video');
+        const canvasElement = document.getElementById('output_canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        
+        const uiLayer = document.getElementById('ui-layer');
+        const startScreen = document.getElementById('start-screen');
+        const successScreen = document.getElementById('success-screen');
+        
+        // --- Setup MediaPipe Hands ---
+        const hands = new Hands({locateFile: (file) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+        }});
+        
+        hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.7,
+            minTrackingConfidence: 0.7
+        });
+        
+        hands.onResults(onResults);
+
+        // --- Camera Setup using native WebRTC ---
+        async function startCamera() {
+            try {
+                // ขออนุญาตใช้กล้องหน้า
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'user', width: 1280, height: 720 }
+                });
+                videoElement.srcObject = stream;
+                
+                return new Promise((resolve) => {
+                    videoElement.onloadedmetadata = () => {
+                        videoElement.play();
+                        // ปรับขนาด Canvas ให้ตรงกับวิดีโอ
+                        canvasElement.width = videoElement.videoWidth;
+                        canvasElement.height = videoElement.videoHeight;
+                        resolve();
+                    };
+                });
+            } catch (error) {
+                console.error("Camera Error: ", error);
+                alert("ไม่สามารถเข้าถึงกล้องได้ กรุณาอนุญาตการใช้งานกล้องในเบราว์เซอร์");
+                return false;
+            }
+        }
+
+        async function processVideoFrame() {
+            if (!gameActive) return;
+            
+            if (!videoElement.paused && !videoElement.ended) {
+                await hands.send({image: videoElement});
+            }
+            // เรียกวนลูปไปเรื่อยๆ
+            requestAnimationFrame(processVideoFrame);
+        }
+
+        // --- Game Flow Controllers ---
+        async function startGame() {
+            startScreen.classList.add('hidden-screen');
+            
+            // เปลี่ยนปุ่มเป็นสถานะกำลังโหลด
+            document.getElementById('feedback-msg').innerText = "กำลังเชื่อมต่อกล้องและ AI...";
+            
+            const camStarted = await startCamera();
+            if(camStarted !== false) {
+                gameActive = true;
+                uiLayer.classList.remove('hidden-screen');
+                loadLevel(0);
+                
+                // เริ่มรัน AI Inference
+                requestAnimationFrame(processVideoFrame);
+            } else {
+                startScreen.classList.remove('hidden-screen');
+            }
+        }
+
+        function returnToMenu() {
+            gameActive = false;
+            if(stream) {
+                stream.getTracks().forEach(track => track.stop()); // ปิดกล้อง
+            }
+            uiLayer.classList.add('hidden-screen');
+            successScreen.classList.add('hidden-screen');
+            startScreen.classList.remove('hidden-screen');
+            
+            // Clear canvas
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+        }
+
+        function loadLevel(index) {
+            if(index >= levels.length) {
+                alert("ยินดีด้วย! คุณเคลียร์ครบทุกด่านแล้ว (คุณสามารถสร้างด่านเพิ่มในโค้ดได้)");
+                index = 0; // วนกลับด่านแรก
+            }
+            
+            currentLevelIndex = index;
+            const level = levels[currentLevelIndex];
+            
+            // อัปเดต UI
+            document.getElementById('level-display').innerText = currentLevelIndex + 1;
+            document.getElementById('target-name').innerText = level.name;
+            document.getElementById('target-desc').innerText = level.desc;
+            document.getElementById('target-icon-container').innerText = level.icon;
+            
+            // รีเซ็ตสถานะ
+            holdFrames = 0;
+            updateAccuracyUI(0, "เริ่มทำท่าทางที่กำหนด");
+            document.getElementById('target-icon-container').classList.remove('success-anim');
+            successScreen.classList.add('hidden-screen');
+            isProcessing = false;
+        }
+
+        function nextLevel() {
+            loadLevel(currentLevelIndex + 1);
+        }
+
+        // --- Hand Feature Extraction (Math) ---
+        function getDistance(lm1, lm2) {
+            // คำนวณระยะห่างด้วยพีทาโกรัสบนแกน x, y (Normalized Coordinates)
+            const dx = lm1.x - lm2.x;
+            const dy = lm1.y - lm2.y;
+            return Math.sqrt(dx * dx + dy * dy);
+        }
+
+        function extractFingerStates(landmarks) {
+            const wrist = landmarks[0];
+            
+            // กฎพื้นฐาน: เทียบระยะห่างระหว่าง "ข้อมือถึงปลายนิ้ว (Tip)" กับ "ข้อมือถึงข้อต่อกลางนิ้ว (PIP/MCP)"
+            // ถ้าระยะถึงปลาย ไกลกว่าระยะถึงข้อต่อ แปลว่ากำลัง "เหยียดนิ้ว"
+            
+            // 1. นิ้วโป้ง (Thumb): โครงสร้างต่างจากนิ้วอื่น เทียบ Tip(4) กับ MCP(2) เทียบกับฐานนิ้วก้อย(17)
+            const thumbTipDist = getDistance(landmarks[17], landmarks[4]);
+            const thumbMcpDist = getDistance(landmarks[17], landmarks[2]);
+            const isThumbOpen = thumbTipDist > thumbMcpDist * 1.2;
+
+            // 2. นิ้วชี้ (Index): Tip(8), PIP(6)
+            const isIndexOpen = getDistance(wrist, landmarks[8]) > getDistance(wrist, landmarks[6]);
+            
+            // 3. นิ้วกลาง (Middle): Tip(12), PIP(10)
+            const isMiddleOpen = getDistance(wrist, landmarks[12]) > getDistance(wrist, landmarks[10]);
+            
+            // 4. นิ้วนาง (Ring): Tip(16), PIP(14)
+            const isRingOpen = getDistance(wrist, landmarks[16]) > getDistance(wrist, landmarks[14]);
+            
+            // 5. นิ้วก้อย (Pinky): Tip(20), PIP(18)
+            const isPinkyOpen = getDistance(wrist, landmarks[20]) > getDistance(wrist, landmarks[18]);
+
+            return {
+                thumb: isThumbOpen,
+                index: isIndexOpen,
+                middle: isMiddleOpen,
+                ring: isRingOpen,
+                pinky: isPinkyOpen
+            };
+        }
+
+        // --- Core Render & Evaluation Loop ---
+        function onResults(results) {
+            if(!gameActive) return;
+
+            // 1. วาดวิดีโอกลับด้าน (Mirror) ลง Canvas
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            canvasCtx.translate(canvasElement.width, 0);
+            canvasCtx.scale(-1, 1);
+            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+            // 2. ถ้าเจอมือ ให้ประมวลผล
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const landmarks = results.multiHandLandmarks[0];
+                
+                // วาดโครงกระดูกมือ (Hand Skeleton Render)
+                drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#22c55e', lineWidth: 4});
+                drawLandmarks(canvasCtx, landmarks, {color: '#ffffff', lineWidth: 2, radius: 4});
+                
+                canvasCtx.restore(); // Restore context orientation before UI updates
+
+                if(!isProcessing) {
+                    evaluateGesture(landmarks);
+                }
+            } else {
+                canvasCtx.restore();
+                if(!isProcessing) {
+                    updateAccuracyUI(0, "ไม่พบมือในกล้อง");
+                    holdFrames = 0;
+                }
+            }
+        }
+
+        function evaluateGesture(landmarks) {
+            const currentState = extractFingerStates(landmarks);
+            const targetRules = levels[currentLevelIndex].rules;
+            
+            let totalFingers = 5;
+            let correctFingers = 0;
+            let feedbackParts = [];
+
+            // ตรวจสอบทีละนิ้ว
+            if(currentState.thumb === targetRules.thumb) correctFingers++; else feedbackParts.push("นิ้วโป้ง");
+            if(currentState.index === targetRules.index) correctFingers++; else feedbackParts.push("นิ้วชี้");
+            if(currentState.middle === targetRules.middle) correctFingers++; else feedbackParts.push("นิ้วกลาง");
+            if(currentState.ring === targetRules.ring) correctFingers++; else feedbackParts.push("นิ้วนาง");
+            if(currentState.pinky === targetRules.pinky) correctFingers++; else feedbackParts.push("นิ้วก้อย");
+
+            // คำนวณ Accuracy 0-100%
+            const accuracy = (correctFingers / totalFingers) * 100;
+            
+            let msg = "";
+            if (accuracy === 100) {
+                msg = "ค้างไว้...";
+                holdFrames++;
+                
+                if (holdFrames >= FRAMES_TO_PASS) {
+                    gestureSuccess();
+                    return; // Stop evaluation for this frame
+                }
+            } else {
+                holdFrames = 0; // รีเซ็ตการนับถ้าท่าเพี้ยน
+                if(accuracy >= 60) {
+                    msg = `ใกล้แล้ว! ปรับ: ${feedbackParts.join(', ')}`;
+                } else {
+                    msg = "พยายามเข้า ทำตามรูปตัวอย่าง";
+                }
+            }
+
+            updateAccuracyUI(accuracy, msg);
+        }
+
+        function updateAccuracyUI(accuracy, message) {
+            const bar = document.getElementById('accuracy-bar');
+            const text = document.getElementById('accuracy-text');
+            const msgEl = document.getElementById('feedback-msg');
+            
+            bar.style.width = `${accuracy}%`;
+            text.innerText = Math.round(accuracy);
+            msgEl.innerText = message;
+
+            // เปลี่ยนสีหลอดตามคะแนน
+            if (accuracy >= 100) {
+                bar.className = "h-full bg-emerald-500 progress-bar-transition";
+                text.className = "font-bold text-emerald-400";
+            } else if (accuracy >= 60) {
+                bar.className = "h-full bg-yellow-400 progress-bar-transition";
+                text.className = "font-bold text-yellow-400";
+            } else {
+                bar.className = "h-full bg-blue-500 progress-bar-transition";
+                text.className = "font-bold text-blue-400";
+            }
+        }
+
+        function gestureSuccess() {
+            isProcessing = true;
+            
+            // อัปเดต XP
+            totalXP += 100;
+            document.getElementById('xp-display').innerText = totalXP;
+            
+            // Animation วงกลมเป้าหมาย
+            document.getElementById('target-icon-container').classList.add('success-anim');
+            
+            // แสดงหน้าจอผ่านด่าน
+            setTimeout(() => {
+                successScreen.classList.remove('hidden-screen');
+            }, 300);
+        }
+    </script>
+</body>
+</html>
